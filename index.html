@@ -183,6 +183,42 @@
       color: #721c24;
       border: 1px solid #f5c6cb;
     }
+
+    .action-buttons {
+      display: flex;
+      gap: 5px;
+    }
+
+    .edit-btn {
+      background-color: #FFC107;
+      color: black;
+    }
+
+    .delete-btn {
+      background-color: #f44336;
+      color: white;
+    }
+
+    .save-btn {
+      background-color: #4CAF50;
+      color: white;
+    }
+
+    .cancel-btn {
+      background-color: #607D8B;
+      color: white;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    #transactionTable thead tr th:nth-child(9),#transactionTable tbody tr td:nth-child(9){
+        display: none;
+    }
+    #transactionTable thead tr th:nth-child(10),#transactionTable tbody tr td:nth-child(10){
+        display: none;
+    }
   </style>
 </head>
 
@@ -201,7 +237,6 @@
           <label for="type">Type:</label>
           <select id="type">
             <option>Buy</option>
-            <option>Sell</option>
           </select>
         </div>
         <div class="form-group">
@@ -243,8 +278,12 @@
         </div>
       </div>
 
+      <input type="hidden" id="editRowIndex" value="-1">
+
       <div class="buttons">
-        <button type="button" class="primary-btn" onclick="addTransaction()">Add Transaction</button>
+        <button type="button" class="primary-btn" id="addButton" onclick="addTransaction()">Add Transaction</button>
+        <button type="button" class="primary-btn hidden" id="updateButton" onclick="updateTransaction()">Update Transaction</button>
+        <button type="button" class="secondary-btn hidden" id="cancelButton" onclick="cancelEdit()">Cancel Edit</button>
         <button type="button" class="secondary-btn" onclick="downloadCSV()">Download CSV</button>
         <div class="file-input-wrapper">
           <button class="secondary-btn">Upload CSV</button>
@@ -297,6 +336,10 @@
   <script>
     const tableBody = document.querySelector("#transactionTable tbody");
     const statusMessage = document.getElementById("statusMessage");
+    const addButton = document.getElementById("addButton");
+    const updateButton = document.getElementById("updateButton");
+    const cancelButton = document.getElementById("cancelButton");
+    const editRowIndex = document.getElementById("editRowIndex");
 
     // Display status message
     function showMessage(message, isError = false) {
@@ -328,8 +371,16 @@
         const profit = sellTotal - buyTotal;
         const profitPercentage = (profit / buyTotal) * 100;
         
+        // Format profit value based on size
+        let formattedValue;
+        if (Math.abs(profit) < 0.01) {
+          formattedValue = profit.toString();
+        } else {
+          formattedValue = profit.toFixed(2);
+        }
+        
         return {
-          value: profit.toFixed(2),
+          value: formattedValue,
           percentage: profitPercentage.toFixed(2),
           isPositive: profit > 0
         };
@@ -375,17 +426,27 @@
         // Calculate profit
         profitData = calculateProfit(type, amount, price, targetPrice, fee);
 
-        rowData = [date, type, crypto, amount.toString(), price.toFixed(2), total.toFixed(2),
-          targetPrice ? targetPrice.toFixed(2) : "", duration,
-          fee.toFixed(2), net.toFixed(2), notes];
+        // Handle small decimal values properly
+        const priceStr = price < 0.01 ? price.toString() : price.toFixed(2);
+        const totalStr = total < 0.01 ? total.toString() : total.toFixed(2);
+        const targetPriceStr = targetPrice ? (targetPrice < 0.01 ? targetPrice.toString() : targetPrice.toFixed(2)) : "";
+        const feeStr = fee < 0.01 ? fee.toString() : fee.toFixed(2);
+        const netStr = Math.abs(net) < 0.01 ? net.toString() : net.toFixed(2);
+        
+        rowData = [date, type, crypto, amount.toString(), priceStr, totalStr,
+          targetPriceStr, duration, feeStr, netStr, notes];
       }
 
       const row = document.createElement("tr");
 
       // Add data cells
-      rowData.forEach(cell => {
+      rowData.forEach((cell,i) => {
         const td = document.createElement("td");
-        td.textContent = cell;
+        if(i=== 2){
+            td.innerHTML = `<a href="https://www.binance.com/en/trade/${cell}_USDT?type=spot" target="_blank">${cell}</a>`;
+        }else{
+            td.textContent = cell;
+        }
         row.appendChild(td);
       });
       
@@ -405,25 +466,27 @@
       
       row.insertBefore(profitCell, row.lastChild);
 
-      // Add action cell with delete button
+      // Add action cell with edit and delete buttons
       const actionCell = document.createElement("td");
+      actionCell.className = "action-buttons";
+      
+      // Edit button
+      const editBtn = document.createElement("button");
+      editBtn.textContent = "Edit";
+      editBtn.className = "edit-btn";
+      editBtn.onclick = function() {
+        editTransaction(row);
+      };
+      
+      // Delete button
       const deleteBtn = document.createElement("button");
       deleteBtn.textContent = "Delete";
-      deleteBtn.style.backgroundColor = "#f44336";
-      deleteBtn.style.color = "white";
-      deleteBtn.style.padding = "5px 10px";
-      deleteBtn.style.border = "none";
-      deleteBtn.style.borderRadius = "3px";
-      deleteBtn.style.cursor = "pointer";
-
-      deleteBtn.onclick = function () {
-        row.remove();
-        updateSummary();
-        // Save to local storage after deleting
-        saveTransactionsToLocalStorage();
-        showMessage("Transaction deleted");
+      deleteBtn.className = "delete-btn";
+      deleteBtn.onclick = function() {
+        deleteTransaction(row);
       };
 
+      actionCell.appendChild(editBtn);
       actionCell.appendChild(deleteBtn);
       row.appendChild(actionCell);
 
@@ -446,6 +509,137 @@
       filterTransactions();
     }
 
+    // Edit a transaction
+    function editTransaction(row) {
+      // Get the row index
+      const rowIndex = Array.from(tableBody.rows).indexOf(row);
+      editRowIndex.value = rowIndex;
+      
+      // Populate form with row data
+      document.getElementById("date").value = row.cells[0].textContent;
+      document.getElementById("type").value = row.cells[1].textContent;
+      document.getElementById("crypto").value = row.cells[2].textContent;
+      document.getElementById("amount").value = row.cells[3].textContent;
+      document.getElementById("price").value = row.cells[4].textContent;
+      document.getElementById("targetPrice").value = row.cells[6].textContent || "";
+      document.getElementById("duration").value = row.cells[7].textContent || "";
+      document.getElementById("fee").value = row.cells[8].textContent;
+      document.getElementById("notes").value = row.cells[11].textContent;
+      
+      // Switch buttons
+      addButton.classList.add("hidden");
+      updateButton.classList.remove("hidden");
+      cancelButton.classList.remove("hidden");
+      
+      // Scroll to form
+      document.getElementById("cryptoForm").scrollIntoView({ behavior: "smooth" });
+      showMessage("Editing transaction");
+    }
+
+    // Update an edited transaction
+    function updateTransaction() {
+      const rowIndex = parseInt(editRowIndex.value);
+      if (rowIndex === -1) {
+        showMessage("No transaction selected for editing", true);
+        return;
+      }
+      
+      const row = tableBody.rows[rowIndex];
+      if (!row) {
+        showMessage("Transaction not found", true);
+        return;
+      }
+      
+      // Get form values
+      const date = document.getElementById("date").value;
+      const type = document.getElementById("type").value;
+      const crypto = document.getElementById("crypto").value;
+      const amount = parseFloat(document.getElementById("amount").value);
+      const price = parseFloat(document.getElementById("price").value);
+      const targetPrice = parseFloat(document.getElementById("targetPrice").value || 0);
+      const duration = document.getElementById("duration").value || "";
+      const fee = parseFloat(document.getElementById("fee").value || 0);
+      const notes = document.getElementById("notes").value;
+
+      if (!date || !crypto || isNaN(amount) || isNaN(price)) {
+        showMessage("Please fill in all required fields.", true);
+        return;
+      }
+
+      // Calculate new values
+      const total = amount * price;
+      const net = type === "Buy" ? -(total + fee) : total - fee;
+      
+      // Format values
+      const priceStr = price < 0.01 ? price.toString() : price.toFixed(2);
+      const totalStr = total < 0.01 ? total.toString() : total.toFixed(2);
+      const targetPriceStr = targetPrice ? (targetPrice < 0.01 ? targetPrice.toString() : targetPrice.toFixed(2)) : "";
+      const feeStr = fee < 0.01 ? fee.toString() : fee.toFixed(2);
+      const netStr = Math.abs(net) < 0.01 ? net.toString() : net.toFixed(2);
+      
+      // Calculate profit
+      const profitData = calculateProfit(type, amount, price, targetPrice, fee);
+      
+      // Update cells
+      row.cells[0].textContent = date;
+      row.cells[1].textContent = type;
+      row.cells[2].textContent = crypto;
+      row.cells[3].textContent = amount.toString();
+      row.cells[4].textContent = priceStr;
+      row.cells[5].textContent = totalStr;
+      row.cells[6].textContent = targetPriceStr;
+      row.cells[7].textContent = duration;
+      row.cells[8].textContent = feeStr;
+      row.cells[9].textContent = netStr;
+      
+      // Update profit cell
+      if (typeof profitData === "object") {
+        row.cells[10].textContent = `$${profitData.value} (${profitData.percentage}%)`;
+        row.cells[10].className = profitData.isPositive ? "profit-positive" : "profit-negative";
+      } else {
+        row.cells[10].textContent = profitData;
+        row.cells[10].className = "";
+      }
+      
+      row.cells[11].textContent = notes;
+      
+      // Reset form and buttons
+      document.getElementById("cryptoForm").reset();
+      editRowIndex.value = -1;
+      addButton.classList.remove("hidden");
+      updateButton.classList.add("hidden");
+      cancelButton.classList.add("hidden");
+      
+      // Set today's date
+      setTodayDate();
+      
+      // Update summary and save
+      updateSummary();
+      saveTransactionsToLocalStorage();
+      
+      showMessage("Transaction updated successfully");
+    }
+
+    // Cancel the edit operation
+    function cancelEdit() {
+      document.getElementById("cryptoForm").reset();
+      editRowIndex.value = -1;
+      addButton.classList.remove("hidden");
+      updateButton.classList.add("hidden");
+      cancelButton.classList.add("hidden");
+      setTodayDate();
+      showMessage("Edit cancelled");
+    }
+
+    // Delete a transaction
+    function deleteTransaction(row) {
+      row.remove();
+      updateSummary();
+      // Save to local storage after deleting
+      saveTransactionsToLocalStorage();
+      showMessage("Transaction deleted");
+    }
+
     // Download transactions as CSV
     function downloadCSV() {
       if (tableBody.rows.length === 0) {
@@ -457,7 +651,7 @@
       const rows = [headers];
 
       for (let row of tableBody.rows) {
-        // Skip the last cell which contains the delete button
+        // Skip the last cell which contains the buttons
         rows.push(Array.from(row.cells).slice(0, -1).map(cell => cell.textContent));
       }
 
@@ -711,27 +905,38 @@
       // Update filter options
       updateFilterOptions();
 
+      // Format numbers based on size
+      const formatNumber = (num) => {
+        return Math.abs(num) < 0.01 ? num.toString() : num.toFixed(2);
+      };
+      
       // Generate HTML
-      let html = `<p><strong>Total Invested:</strong> $${Math.abs(totalInvested).toFixed(2)}</p>`;
-      html += `<p><strong>Total Fees:</strong> $${totalFees.toFixed(2)}</p>`;
+      let html = `<p><strong>Total Invested:</strong> ${formatNumber(Math.abs(totalInvested))}</p>`;
+      html += `<p><strong>Total Fees:</strong> ${formatNumber(totalFees)}</p>`;
       
       if (totalProjectedProfit !== 0) {
         const profitClass = totalProjectedProfit > 0 ? "profit-positive" : "profit-negative";
         const profitPercentage = (totalProjectedProfit / (Math.abs(totalInvested) + totalFees)) * 100;
-        html += `<p><strong>Total Projected Profit:</strong> <span class="${profitClass}">$${totalProjectedProfit.toFixed(2)} (${profitPercentage.toFixed(2)}%)</span></p>`;
+        html += `<p><strong>Total Projected Profit:</strong> <span class="${profitClass}">${formatNumber(totalProjectedProfit)} (${profitPercentage.toFixed(2)}%)</span></p>`;
       }
       
       html += `<p><strong>Holdings:</strong></p>`;
       html += `<ul>`;
 
-      for (let crypto in portfolio) {
+        for (let crypto in portfolio) {
         if (portfolio[crypto].totalAmount > 0) {
           const avgPrice = portfolio[crypto].costBasis / portfolio[crypto].totalAmount;
-          html += `<li><strong>${crypto}:</strong> ${portfolio[crypto].totalAmount.toFixed(8)} (Avg. Price: $${avgPrice.toFixed(2)})`;
+          // Format amounts with appropriate precision
+          const formattedAmount = portfolio[crypto].totalAmount.toFixed(8);
+          const formattedAvgPrice = avgPrice < 0.01 ? avgPrice.toString() : avgPrice.toFixed(2);
+          html += `<li><strong>${crypto}:</strong> ${formattedAmount} (Avg. Price: ${formattedAvgPrice})`;
           
           if (portfolio[crypto].projectedProfit !== 0) {
             const profitClass = portfolio[crypto].projectedProfit > 0 ? "profit-positive" : "profit-negative";
-            html += ` - <span class="${profitClass}">Projected Profit: $${portfolio[crypto].projectedProfit.toFixed(2)}</span>`;
+            const formattedProfit = Math.abs(portfolio[crypto].projectedProfit) < 0.01 ? 
+              portfolio[crypto].projectedProfit.toString() : 
+              portfolio[crypto].projectedProfit.toFixed(2);
+            html += ` - <span class="${profitClass}">Projected Profit: ${formattedProfit}</span>`;
           }
           
           html += `</li>`;
